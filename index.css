@@ -1,0 +1,32 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --sage: #9CAF99;
+  --sage-dark: #354238;
+  --sage-hover: #849681;
+  --soft-green: #E6E9E6;
+  --soft-green-bg: #F5F6F5;
+  --warm-white: #FFFCF9;
+  --stone: #8C867D;
+  --stone-dark: #4A453E;
+  --text-dark: #2B2826;
+  --card-bg: #FFFFFF;
+  --border-subtle: #E8E6E1;
+}
+
+body {
+  margin: 0;
+  padding: 0;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+.material-symbols-outlined {
+  font-variation-settings:
+    'FILL' 0,
+    'wght' 400,
+    'GRAD' 0,
+    'opsz' 24;
+}

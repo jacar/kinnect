@@ -1,11 +1,23 @@
-import { createClient } from '@supabase/supabase-js';
-
-// --- CONFIGURACIÓN DE SUPABASE ---
-const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL || '';
-const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY || '';
-
-// Inicializar cliente
-export const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+import { auth, db, googleProvider } from './firebase';
+import { 
+  signInWithPopup, 
+  signInWithEmailAndPassword, 
+  createUserWithEmailAndPassword, 
+  signOut as firebaseSignOut, 
+  sendPasswordResetEmail
+} from "firebase/auth";
+import { 
+  collection, 
+  addDoc, 
+  getDocs, 
+  getDoc, 
+  doc, 
+  query, 
+  where, 
+  orderBy, 
+  updateDoc,
+  setDoc
+} from "firebase/firestore";
 
 // Tipos de datos
 export interface Contact {
@@ -20,220 +32,175 @@ export interface Contact {
   privateNotes?: string;
   interests: string[];
   birthday?: string;
+  userId: string;
 }
 
 export interface Interaction {
   id: string;
   contactId: string;
+  userId: string;
   type: 'meetup' | 'call' | 'message' | 'note';
   date: string;
   title: string;
   notes?: string;
   isPrivate: boolean;
   location?: string;
-  contact?: Contact;
+  contact?: Partial<Contact>;
 }
 
-// --- LÓGICA DE BASE DE DATOS (SUPABASE PURO) ---
+// --- LÓGICA DE BASE DE DATOS (FIREBASE) ---
 
-export const db = {
+export const db_service = {
   // --- AUTH ---
   signInWithGoogle: async () => {
-    const redirectUrl = window.location.origin;
-
-    const { error } = await supabase.auth.signInWithOAuth({
-      provider: 'google',
-      options: {
-        redirectTo: redirectUrl,
-        queryParams: {
-          access_type: 'offline',
-          prompt: 'consent',
-        }
-      }
-    });
-
-    if (error) throw error;
+    try {
+      const result = await signInWithPopup(auth, googleProvider);
+      return result.user;
+    } catch (error) {
+      console.error("Error signing in with Google", error);
+      throw error;
+    }
   },
 
   signInWithEmail: async (email, password) => {
-    const { data, error } = await supabase.auth.signInWithPassword({
-      email,
-      password,
-    });
-    if (error) throw error;
-    return data;
+    const result = await signInWithEmailAndPassword(auth, email, password);
+    return result.user;
   },
 
   signUpWithEmail: async (email, password) => {
-    const { data, error } = await supabase.auth.signUp({
-      email,
-      password,
-    });
-    if (error) throw error;
-    return data;
+    const result = await createUserWithEmailAndPassword(auth, email, password);
+    return result.user;
   },
 
   signOut: async () => {
-    const { error } = await supabase.auth.signOut();
-    if (error) throw error;
+    await firebaseSignOut(auth);
   },
 
   resetPassword: async (email: string) => {
-    const redirectUrl = window.location.origin;
-    const { error } = await supabase.auth.resetPasswordForEmail(email, {
-      redirectTo: `${redirectUrl}/reset-password`,
-    });
-    if (error) throw error;
+    await sendPasswordResetEmail(auth, email);
   },
 
+  // --- FIRESTORE ---
   getContacts: async (): Promise<Contact[]> => {
-    const { data, error } = await supabase
-      .from('contacts')
-      .select('*')
-      .order('last_interaction_date', { ascending: true });
+    const user = auth.currentUser;
+    if (!user) return [];
 
-    if (error) {
-      console.error('Supabase Error:', error);
-      return [];
-    }
+    const q = query(
+      collection(db, "contacts"),
+      where("userId", "==", user.uid),
+      orderBy("lastInteractionDate", "asc")
+    );
 
-    return (data || []).map(mapContactFromDB);
+    const querySnapshot = await getDocs(q);
+    return querySnapshot.docs.map(doc => ({
+      id: doc.id,
+      ...doc.data()
+    } as Contact));
   },
 
   getContact: async (id: string): Promise<Contact | undefined> => {
-    const { data, error } = await supabase
-      .from('contacts')
-      .select('*')
-      .eq('id', id)
-      .single();
-
-    if (error || !data) return undefined;
-    return mapContactFromDB(data);
+    const docRef = doc(db, "contacts", id);
+    const docSnap = await getDoc(docRef);
+    
+    if (docSnap.exists()) {
+      return { id: docSnap.id, ...docSnap.data() } as Contact;
+    }
+    return undefined;
   },
 
-  addContact: async (contact: Omit<Contact, 'id'>): Promise<Contact> => {
-    const dbContact = {
-      name: contact.name,
-      nickname: contact.nickname,
-      relation: contact.relation,
-      avatar: contact.avatar,
-      frequency_days: contact.frequencyDays,
-      location: contact.location,
-      private_notes: contact.privateNotes,
-      interests: contact.interests,
-      birthday: contact.birthday,
-      last_interaction_date: new Date().toISOString()
+  addContact: async (contact: Omit<Contact, 'id' | 'userId'>): Promise<Contact> => {
+    const user = auth.currentUser;
+    if (!user) throw new Error("No user logged in");
+
+    const newContact = {
+      ...contact,
+      userId: user.uid,
+      lastInteractionDate: new Date().toISOString(),
+      createdAt: new Date().toISOString()
     };
 
-    const { data, error } = await supabase
-      .from('contacts')
-      .insert([dbContact])
-      .select()
-      .single();
-
-    if (error) throw error;
-    return mapContactFromDB(data);
+    const docRef = await addDoc(collection(db, "contacts"), newContact);
+    return { id: docRef.id, ...newContact } as Contact;
   },
 
   getInteractions: async (contactId: string): Promise<Interaction[]> => {
-    const { data, error } = await supabase
-      .from('interactions')
-      .select('*')
-      .eq('contact_id', contactId)
-      .order('date', { ascending: false });
+    const user = auth.currentUser;
+    if (!user) return [];
 
-    if (error) return [];
+    const q = query(
+      collection(db, "interactions"),
+      where("contactId", "==", contactId),
+      where("userId", "==", user.uid),
+      orderBy("date", "desc")
+    );
 
-    return data.map(mapInteractionFromDB);
+    const querySnapshot = await getDocs(q);
+    return querySnapshot.docs.map(doc => ({
+      id: doc.id,
+      ...doc.data()
+    } as Interaction));
   },
 
   getAllInteractions: async (): Promise<Interaction[]> => {
-    const { data: interactions, error: intError } = await supabase
-      .from('interactions')
-      .select('*')
-      .order('date', { ascending: false });
+    const user = auth.currentUser;
+    if (!user) return [];
 
-    if (intError) return [];
+    const q = query(
+      collection(db, "interactions"),
+      where("userId", "==", user.uid),
+      orderBy("date", "desc")
+    );
 
-    const { data: contacts, error: contError } = await supabase
-      .from('contacts')
-      .select('id, name, avatar');
+    const querySnapshot = await getDocs(q);
+    const interactions = querySnapshot.docs.map(doc => ({
+      id: doc.id,
+      ...doc.data()
+    } as Interaction));
 
-    if (contError) return [];
+    // Fetch contacts for names/avatars
+    const contactsQ = query(collection(db, "contacts"), where("userId", "==", user.uid));
+    const contactsSnapshot = await getDocs(contactsQ);
+    const contactsMap = new Map(contactsSnapshot.docs.map(d => [d.id, d.data()]));
 
-    const contactsMap = new Map((contacts || []).map((c: any) => [c.id, c]));
-
-    return (interactions || []).map((i: any) => {
-      const contactInfo = contactsMap.get(i.contact_id) as any;
-      const mapped = mapInteractionFromDB(i);
-      if (contactInfo) {
-        mapped.contact = {
-          id: contactInfo.id,
-          name: contactInfo.name,
-          avatar: contactInfo.avatar,
-          relation: '',
-          frequencyDays: 0,
-          interests: []
+    return interactions.map(i => {
+      const contactData = contactsMap.get(i.contactId);
+      if (contactData) {
+        i.contact = {
+          id: i.contactId,
+          name: contactData.name,
+          avatar: contactData.avatar
         };
       }
-      return mapped;
+      return i;
     });
   },
 
-  addInteraction: async (interaction: Omit<Interaction, 'id'>): Promise<Interaction> => {
-    const dbInteraction = {
-      contact_id: interaction.contactId,
-      type: interaction.type,
-      date: interaction.date,
-      title: interaction.title,
-      notes: interaction.notes,
-      is_private: interaction.isPrivate,
-      location: interaction.location
+  addInteraction: async (interaction: Omit<Interaction, 'id' | 'userId'>): Promise<Interaction> => {
+    const user = auth.currentUser;
+    if (!user) throw new Error("No user logged in");
+
+    const newInteraction = {
+      ...interaction,
+      userId: user.uid,
+      createdAt: new Date().toISOString()
     };
 
-    const { data, error } = await supabase
-      .from('interactions')
-      .insert([dbInteraction])
-      .select()
-      .single();
+    const docRef = await addDoc(collection(db, "interactions"), newInteraction);
+    
+    // Update last interaction date in contact
+    const contactRef = doc(db, "contacts", interaction.contactId);
+    await updateDoc(contactRef, {
+      lastInteractionDate: interaction.date
+    });
 
-    if (error) throw error;
-
-    await supabase
-      .from('contacts')
-      .update({ last_interaction_date: interaction.date })
-      .eq('id', interaction.contactId);
-
-    return mapInteractionFromDB(data);
+    return { id: docRef.id, ...newInteraction } as Interaction;
   }
 };
 
-// --- HELPERS ---
-
-const mapContactFromDB = (c: any): Contact => ({
-  id: c.id,
-  name: c.name,
-  nickname: c.nickname,
-  relation: c.relation,
-  avatar: c.avatar,
-  lastInteractionDate: c.last_interaction_date,
-  frequencyDays: c.frequency_days,
-  location: c.location,
-  privateNotes: c.private_notes,
-  interests: c.interests || [],
-  birthday: c.birthday
-});
-
-const mapInteractionFromDB = (i: any): Interaction => ({
-  id: i.id,
-  contactId: i.contact_id,
-  type: i.type,
-  date: i.date,
-  title: i.title,
-  notes: i.notes,
-  isPrivate: i.is_private,
-  location: i.location
-});
+// Rename for compatibility with existing imports
+export const db_legacy = db_service;
+export { db_service as db };
+export { auth as supabase }; // Fake export to minimize changes in App.tsx if possible, but better to fix App.tsx
 
 export const formatRelativeTime = (dateString?: string): string => {
   if (!dateString) return 'Nunca';
