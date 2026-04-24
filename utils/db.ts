@@ -87,15 +87,21 @@ export const db_service = {
 
     const q = query(
       collection(db, "contacts"),
-      where("userId", "==", user.uid),
-      orderBy("lastInteractionDate", "asc")
+      where("userId", "==", user.uid)
     );
 
     const querySnapshot = await getDocs(q);
-    return querySnapshot.docs.map(doc => ({
+    const contacts = querySnapshot.docs.map(doc => ({
       id: doc.id,
       ...doc.data()
     } as Contact));
+
+    // Sort in memory to avoid needing a composite index
+    return contacts.sort((a, b) => {
+      const dateA = a.lastInteractionDate ? new Date(a.lastInteractionDate).getTime() : 0;
+      const dateB = b.lastInteractionDate ? new Date(b.lastInteractionDate).getTime() : 0;
+      return dateA - dateB;
+    });
   },
 
   getContact: async (id: string): Promise<Contact | undefined> => {
@@ -127,18 +133,20 @@ export const db_service = {
     const user = auth.currentUser;
     if (!user) return [];
 
+    // Filter by contactId only in Firestore, then filter by userId and sort in memory
     const q = query(
       collection(db, "interactions"),
-      where("contactId", "==", contactId),
-      where("userId", "==", user.uid),
-      orderBy("date", "desc")
+      where("contactId", "==", contactId)
     );
 
     const querySnapshot = await getDocs(q);
-    return querySnapshot.docs.map(doc => ({
-      id: doc.id,
-      ...doc.data()
-    } as Interaction));
+    const interactions = querySnapshot.docs
+      .map(doc => ({ id: doc.id, ...doc.data() } as Interaction))
+      .filter(i => i.userId === user.uid);
+
+    return interactions.sort((a, b) => {
+      return new Date(b.date).getTime() - new Date(a.date).getTime();
+    });
   },
 
   getAllInteractions: async (): Promise<Interaction[]> => {
@@ -147,8 +155,7 @@ export const db_service = {
 
     const q = query(
       collection(db, "interactions"),
-      where("userId", "==", user.uid),
-      orderBy("date", "desc")
+      where("userId", "==", user.uid)
     );
 
     const querySnapshot = await getDocs(q);
@@ -156,6 +163,11 @@ export const db_service = {
       id: doc.id,
       ...doc.data()
     } as Interaction));
+
+    // Sort in memory
+    interactions.sort((a, b) => {
+      return new Date(b.date).getTime() - new Date(a.date).getTime();
+    });
 
     // Fetch contacts for names/avatars
     const contactsQ = query(collection(db, "contacts"), where("userId", "==", user.uid));
