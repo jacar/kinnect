@@ -1,6 +1,6 @@
 import React from 'react';
 import { View } from '../types';
-import Footer from './Footer';
+
 
 interface GuideProps {
     onNavigate: (view: View) => void;
@@ -131,7 +131,7 @@ const Guide: React.FC<GuideProps> = ({ onNavigate }) => {
                 </div>
             </main>
 
-            <Footer onNavigate={onNavigate} />
+
         </div>
     );
 };

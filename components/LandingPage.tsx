@@ -100,8 +100,8 @@ const LandingPage: React.FC<Props> = ({ onNavigate }) => {
                     </div>
                 </div>
                 <nav className="hidden sm:flex items-center gap-8">
-                    <button className="text-sm font-medium text-stone hover:text-sage-dark transition-colors">Sobre nosotros</button>
-                    <button className="text-sm font-medium text-stone hover:text-sage-dark transition-colors">Ayuda</button>
+                    <button onClick={() => onNavigate(View.ABOUT)} className="text-sm font-medium text-stone hover:text-sage-dark transition-colors">Sobre nosotros</button>
+                    <button onClick={() => onNavigate(View.GUIDE)} className="text-sm font-medium text-stone hover:text-sage-dark transition-colors">Ayuda</button>
                 </nav>
             </header>
 

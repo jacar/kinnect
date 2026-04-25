@@ -126,7 +126,7 @@ const App: React.FC = () => {
   return (
     <div className="min-h-screen w-full font-display">
       {renderView()}
-      <Footer onNavigate={handleNavigate} />
+      {currentView !== View.LANDING && <Footer onNavigate={handleNavigate} />}
     </div>
   );
 };

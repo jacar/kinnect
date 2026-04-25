@@ -1,6 +1,6 @@
 import React from 'react';
 import { View } from '../types';
-import Footer from './Footer';
+
 
 interface AboutProps {
     onNavigate: (view: View) => void;
@@ -108,7 +108,7 @@ const About: React.FC<AboutProps> = ({ onNavigate }) => {
                 </div>
             </main>
 
-            <Footer onNavigate={onNavigate} />
+
         </div>
     );
 };
